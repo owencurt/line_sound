@@ -43,6 +43,8 @@ export default function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [lines, setLines] = useState(getInitialLines);
   const [selectedLineId, setSelectedLineId] = useState(lines[0]?.id ?? null);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
 
   const audio = useAudioEngine();
 
@@ -147,6 +149,26 @@ export default function App() {
     const url = URL.createObjectURL(file);
     if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     setSourceUrl(url);
+    setCurrentTime(0);
+    setDuration(0);
+  };
+
+  const togglePlayback = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    await audio.ensureContext();
+    if (video.paused) {
+      await video.play();
+    } else {
+      video.pause();
+    }
+  };
+
+  const onScrub = (value) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = value;
+    setCurrentTime(value);
   };
 
   return (
@@ -191,9 +213,36 @@ export default function App() {
               const video = videoRef.current;
               if (!video) return;
               setVideoSize({ width: video.videoWidth, height: video.videoHeight });
+              setDuration(video.duration || 0);
             }}
             onPlaybackState={setIsPlaying}
+            onTimeUpdate={() => {
+              const video = videoRef.current;
+              if (!video) return;
+              setCurrentTime(video.currentTime);
+            }}
+            onDurationChange={() => {
+              const video = videoRef.current;
+              if (!video) return;
+              setDuration(video.duration || 0);
+            }}
           />
+          {sourceUrl && (
+            <div className="playback-controls">
+              <button onClick={togglePlayback}>{isPlaying ? 'Pause' : 'Play'}</button>
+              <input
+                type="range"
+                min="0"
+                max={Math.max(duration, 0.001)}
+                step="0.01"
+                value={Math.min(currentTime, duration || 0)}
+                onChange={(e) => onScrub(Number(e.target.value))}
+              />
+              <span>
+                {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
+              </span>
+            </div>
+          )}
         </section>
       </main>
     </div>

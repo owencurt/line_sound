@@ -40,6 +40,8 @@ export function VideoStage({
   showDebug,
   onLoadedMetadata,
   onPlaybackState,
+  onTimeUpdate,
+  onDurationChange,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -233,7 +235,8 @@ export function VideoStage({
             onLoadedMetadata={onLoadedMetadata}
             onPlay={() => onPlaybackState(true)}
             onPause={() => onPlaybackState(false)}
-            controls
+            onTimeUpdate={onTimeUpdate}
+            onDurationChange={onDurationChange}
           />
           <canvas
             ref={canvasRef}

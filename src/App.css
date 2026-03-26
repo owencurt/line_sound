@@ -171,6 +171,23 @@ input[type='range'] {
   gap: 0.8rem;
 }
 
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.playback-controls input[type='range'] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.playback-controls span {
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
 .upload-row {
   display: flex;
   align-items: center;
