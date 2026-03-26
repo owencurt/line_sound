@@ -74,12 +74,6 @@ export function useAudioEngine() {
     const voice = voicesRef.current.get(id);
 
     if (voice) {
-      const nearestRoot = pickNearestSampleMidi(targetMidi);
-      voice.source.playbackRate.setTargetAtTime(
-        2 ** ((targetMidi - nearestRoot) / 12),
-        context.currentTime,
-        0.07,
-      );
       return;
     }
 
