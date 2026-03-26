@@ -1,112 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
-import { pointToSegmentDistance, toPixels } from '../lib/geometry';
+import { toPixels } from '../lib/geometry';
 
-const MAX_ANALYSIS_WIDTH = 320;
-const FRAME_INTERVAL = 70;
-const TRACK_TIMEOUT = 220;
-const RELEASE_TIMEOUT = 180;
-const OBJECT_TIMEOUT = 260;
+const MAX_ANALYSIS_WIDTH = 360;
+const FRAME_INTERVAL = 60;
+const TRACK_TIMEOUT = 320;
+const RELEASE_TIMEOUT = 120;
 
-function clusterIntersections(intersections) {
-  const clusters = [];
+const FG_THRESHOLD = 28;
+const BG_ALPHA_STATIC = 0.06;
+const BG_ALPHA_MOVING = 0.003;
 
-  intersections.forEach((item) => {
-    let bestCluster = null;
-    let bestDistance = Infinity;
-
-    clusters.forEach((cluster) => {
-      const d = Math.hypot(cluster.centroid.x - item.centroid.x, cluster.centroid.y - item.centroid.y);
-      if (d < 80 && d < bestDistance) {
-        bestDistance = d;
-        bestCluster = cluster;
+function dilate(binary, width, height) {
+  const out = new Uint8Array(binary.length);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      if (
+        binary[idx] ||
+        binary[idx - 1] ||
+        binary[idx + 1] ||
+        binary[idx - width] ||
+        binary[idx + width]
+      ) {
+        out[idx] = 1;
       }
-    });
-
-    if (!bestCluster) {
-      clusters.push({
-        area: item.area,
-        centroid: item.centroid,
-        speed: item.speed,
-      });
-      return;
     }
-
-    const combinedArea = bestCluster.area + item.area;
-    bestCluster.centroid = {
-      x: (bestCluster.centroid.x * bestCluster.area + item.centroid.x * item.area) / combinedArea,
-      y: (bestCluster.centroid.y * bestCluster.area + item.centroid.y * item.area) / combinedArea,
-    };
-    bestCluster.speed = Math.max(bestCluster.speed, item.speed);
-    bestCluster.area = combinedArea;
-  });
-
-  return clusters;
+  }
+  return out;
 }
 
-function mergeNearbyBlobs(sourceBlobs) {
-  const blobs = [...sourceBlobs];
-  const merged = [];
-
-  while (blobs.length) {
-    let base = blobs.pop();
-    let didMerge = true;
-
-    while (didMerge) {
-      didMerge = false;
-      for (let i = blobs.length - 1; i >= 0; i -= 1) {
-        const candidate = blobs[i];
-        const cx = base.centroid.x - candidate.centroid.x;
-        const cy = base.centroid.y - candidate.centroid.y;
-        const centroidDistance = Math.hypot(cx, cy);
-
-        const gapX = Math.max(
-          0,
-          Math.max(base.bbox.minX, candidate.bbox.minX) - Math.min(base.bbox.maxX, candidate.bbox.maxX),
-        );
-        const gapY = Math.max(
-          0,
-          Math.max(base.bbox.minY, candidate.bbox.minY) - Math.min(base.bbox.maxY, candidate.bbox.maxY),
-        );
-        const edgeGap = Math.hypot(gapX, gapY);
-
-        if (centroidDistance > 90 && edgeGap > 28) continue;
-
-        const area = base.area + candidate.area;
-        base = {
-          area,
-          centroid: {
-            x: (base.centroid.x * base.area + candidate.centroid.x * candidate.area) / area,
-            y: (base.centroid.y * base.area + candidate.centroid.y * candidate.area) / area,
-          },
-          bbox: {
-            minX: Math.min(base.bbox.minX, candidate.bbox.minX),
-            minY: Math.min(base.bbox.minY, candidate.bbox.minY),
-            maxX: Math.max(base.bbox.maxX, candidate.bbox.maxX),
-            maxY: Math.max(base.bbox.maxY, candidate.bbox.maxY),
-          },
-        };
-        blobs.splice(i, 1);
-        didMerge = true;
+function erode(binary, width, height) {
+  const out = new Uint8Array(binary.length);
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const idx = y * width + x;
+      if (
+        binary[idx] &&
+        binary[idx - 1] &&
+        binary[idx + 1] &&
+        binary[idx - width] &&
+        binary[idx + width]
+      ) {
+        out[idx] = 1;
       }
     }
-
-    merged.push(base);
   }
-
-  return merged;
+  return out;
 }
 
 function connectedComponents(binary, width, height, minArea) {
   const visited = new Uint8Array(binary.length);
   const blobs = [];
-  const queue = [];
+  const stack = [];
 
   for (let i = 0; i < binary.length; i += 1) {
     if (!binary[i] || visited[i]) continue;
 
     visited[i] = 1;
-    queue.length = 0;
-    queue.push(i);
+    stack.length = 0;
+    stack.push(i);
 
     let area = 0;
     let sumX = 0;
@@ -116,10 +68,11 @@ function connectedComponents(binary, width, height, minArea) {
     let maxX = 0;
     let maxY = 0;
 
-    while (queue.length) {
-      const idx = queue.pop();
+    while (stack.length) {
+      const idx = stack.pop();
       const x = idx % width;
       const y = Math.floor(idx / width);
+
       area += 1;
       sumX += x;
       sumY += y;
@@ -131,11 +84,8 @@ function connectedComponents(binary, width, height, minArea) {
       const neighbors = [idx - 1, idx + 1, idx - width, idx + width];
       neighbors.forEach((n) => {
         if (n < 0 || n >= binary.length || visited[n] || !binary[n]) return;
-        const nx = n % width;
-        const ny = Math.floor(n / width);
-        if (Math.abs(nx - x) + Math.abs(ny - y) > 1) return;
         visited[n] = 1;
-        queue.push(n);
+        stack.push(n);
       });
     }
 
@@ -151,26 +101,76 @@ function connectedComponents(binary, width, height, minArea) {
   return blobs;
 }
 
-export function useMotionDetection({
-  videoRef,
-  dimensions,
-  isPlaying,
-  lines,
-  debugEnabled,
-}) {
+function orientation(a, b, c) {
+  const value = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+  if (Math.abs(value) < 0.00001) return 0;
+  return value > 0 ? 1 : 2;
+}
+
+function segmentsIntersect(p1, q1, p2, q2) {
+  const o1 = orientation(p1, q1, p2);
+  const o2 = orientation(p1, q1, q2);
+  const o3 = orientation(p2, q2, p1);
+  const o4 = orientation(p2, q2, q1);
+  return o1 !== o2 && o3 !== o4;
+}
+
+function pointInRect(point, rect) {
+  return point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY;
+}
+
+function lineIntersectsRect(a, b, rect, padding = 0) {
+  const padded = {
+    minX: rect.minX - padding,
+    minY: rect.minY - padding,
+    maxX: rect.maxX + padding,
+    maxY: rect.maxY + padding,
+  };
+
+  if (pointInRect(a, padded) || pointInRect(b, padded)) return true;
+
+  const topLeft = { x: padded.minX, y: padded.minY };
+  const topRight = { x: padded.maxX, y: padded.minY };
+  const bottomLeft = { x: padded.minX, y: padded.maxY };
+  const bottomRight = { x: padded.maxX, y: padded.maxY };
+
+  return (
+    segmentsIntersect(a, b, topLeft, topRight) ||
+    segmentsIntersect(a, b, topRight, bottomRight) ||
+    segmentsIntersect(a, b, bottomRight, bottomLeft) ||
+    segmentsIntersect(a, b, bottomLeft, topLeft)
+  );
+}
+
+function bboxIoU(a, b) {
+  const xA = Math.max(a.minX, b.minX);
+  const yA = Math.max(a.minY, b.minY);
+  const xB = Math.min(a.maxX, b.maxX);
+  const yB = Math.min(a.maxY, b.maxY);
+
+  const interW = Math.max(0, xB - xA);
+  const interH = Math.max(0, yB - yA);
+  const intersection = interW * interH;
+  if (!intersection) return 0;
+
+  const areaA = (a.maxX - a.minX) * (a.maxY - a.minY);
+  const areaB = (b.maxX - b.minX) * (b.maxY - b.minY);
+  return intersection / (areaA + areaB - intersection);
+}
+
+export function useMotionDetection({ videoRef, dimensions, isPlaying, lines, debugEnabled }) {
   const [debugState, setDebugState] = useState({ blobs: [], active: [] });
   const [intersections, setIntersections] = useState([]);
 
   const rafRef = useRef(null);
-  const frameRef = useRef({ prev: null, ts: 0 });
+  const frameRef = useRef({ ts: 0, background: null });
+  const analysisCanvasRef = useRef(null);
+
   const trackingRef = useRef({
     nextTrackId: 1,
-    nextObjectId: 1,
     tracks: new Map(),
-    lineObjects: new Map(),
     activePairs: new Map(),
   });
-  const analysisCanvasRef = useRef(null);
 
   useEffect(() => {
     analysisCanvasRef.current = document.createElement('canvas');
@@ -185,40 +185,45 @@ export function useMotionDetection({
     const video = videoRef.current;
     const analysisCanvas = analysisCanvasRef.current;
     const analysisWidth = Math.min(MAX_ANALYSIS_WIDTH, dimensions.width);
-    const analysisHeight = Math.round(analysisWidth * (dimensions.height / dimensions.width));
+    const analysisHeight = Math.round((analysisWidth * dimensions.height) / dimensions.width);
+    const minArea = Math.max(12, Math.round((analysisWidth * analysisHeight) / 11000));
+
     analysisCanvas.width = analysisWidth;
     analysisCanvas.height = analysisHeight;
-    const ctx = analysisCanvas.getContext('2d', { willReadFrequently: true });
 
-    const minArea = Math.max(8, Math.round((analysisWidth * analysisHeight) / 5000));
+    const ctx = analysisCanvas.getContext('2d', { willReadFrequently: true });
 
     const tick = (ts) => {
       rafRef.current = requestAnimationFrame(tick);
-
       if (ts - frameRef.current.ts < FRAME_INTERVAL || video.paused || video.ended) return;
       frameRef.current.ts = ts;
 
       ctx.drawImage(video, 0, 0, analysisWidth, analysisHeight);
       const frame = ctx.getImageData(0, 0, analysisWidth, analysisHeight);
 
-      if (!frameRef.current.prev) {
-        frameRef.current.prev = frame;
+      const gray = new Float32Array(analysisWidth * analysisHeight);
+      for (let i = 0, p = 0; i < frame.data.length; i += 4, p += 1) {
+        gray[p] = frame.data[i] * 0.299 + frame.data[i + 1] * 0.587 + frame.data[i + 2] * 0.114;
+      }
+
+      if (!frameRef.current.background) {
+        frameRef.current.background = gray;
         return;
       }
 
-      const diffBinary = new Uint8Array(analysisWidth * analysisHeight);
-      const prevData = frameRef.current.prev.data;
-      const currData = frame.data;
+      const background = frameRef.current.background;
+      const fg = new Uint8Array(gray.length);
 
-      for (let i = 0, p = 0; i < currData.length; i += 4, p += 1) {
-        const diff =
-          Math.abs(currData[i] - prevData[i]) +
-          Math.abs(currData[i + 1] - prevData[i + 1]) +
-          Math.abs(currData[i + 2] - prevData[i + 2]);
-        if (diff > 46) diffBinary[p] = 1;
+      for (let i = 0; i < gray.length; i += 1) {
+        const diff = Math.abs(gray[i] - background[i]);
+        const moving = diff > FG_THRESHOLD;
+        fg[i] = moving ? 1 : 0;
+        const alpha = moving ? BG_ALPHA_MOVING : BG_ALPHA_STATIC;
+        background[i] = background[i] * (1 - alpha) + gray[i] * alpha;
       }
 
-      const scaledBlobs = connectedComponents(diffBinary, analysisWidth, analysisHeight, minArea).map((blob) => ({
+      const morph = erode(dilate(fg, analysisWidth, analysisHeight), analysisWidth, analysisHeight);
+      const blobs = connectedComponents(morph, analysisWidth, analysisHeight, minArea).map((blob) => ({
         ...blob,
         centroid: {
           x: (blob.centroid.x / analysisWidth) * dimensions.width,
@@ -232,115 +237,90 @@ export function useMotionDetection({
         },
       }));
 
-      const blobs = mergeNearbyBlobs(scaledBlobs);
-
       const tracker = trackingRef.current;
       const now = performance.now();
-      const trackIds = new Set();
+      const unmatchedTracks = new Set(tracker.tracks.keys());
 
       blobs.forEach((blob) => {
-        let closestTrack = null;
-        let closestDistance = Infinity;
+        let bestTrack = null;
+        let bestScore = 0;
 
         tracker.tracks.forEach((track) => {
-          const d = Math.hypot(track.position.x - blob.centroid.x, track.position.y - blob.centroid.y);
-          if (d < closestDistance && d < 90) {
-            closestDistance = d;
-            closestTrack = track;
+          if (!unmatchedTracks.has(track.id)) return;
+          const iou = bboxIoU(track.bbox, blob.bbox);
+          const dist = Math.hypot(track.centroid.x - blob.centroid.x, track.centroid.y - blob.centroid.y);
+          const score = iou > 0 ? iou + 0.2 : dist < 90 ? 0.15 - dist / 900 : 0;
+          if (score > bestScore) {
+            bestScore = score;
+            bestTrack = track;
           }
         });
 
-        if (!closestTrack) {
-          closestTrack = {
+        if (!bestTrack) {
+          const track = {
             id: tracker.nextTrackId++,
-            position: blob.centroid,
+            bbox: blob.bbox,
+            centroid: blob.centroid,
             speed: 0,
             lastSeen: now,
           };
-          tracker.tracks.set(closestTrack.id, closestTrack);
+          tracker.tracks.set(track.id, track);
+          blob.trackId = track.id;
+          blob.speed = 0;
+          return;
         }
 
-        const dt = Math.max(0.016, (now - closestTrack.lastSeen) / 1000);
-        const instantSpeed = Math.hypot(
-          blob.centroid.x - closestTrack.position.x,
-          blob.centroid.y - closestTrack.position.y,
-        ) / dt;
+        const dt = Math.max(0.016, (now - bestTrack.lastSeen) / 1000);
+        const instantSpeed = Math.hypot(blob.centroid.x - bestTrack.centroid.x, blob.centroid.y - bestTrack.centroid.y) / dt;
 
-        closestTrack.speed = closestTrack.speed * 0.6 + instantSpeed * 0.4;
-        closestTrack.position = blob.centroid;
-        closestTrack.lastSeen = now;
-        trackIds.add(closestTrack.id);
-        blob.trackId = closestTrack.id;
-        blob.speed = closestTrack.speed;
+        bestTrack.speed = bestTrack.speed * 0.6 + instantSpeed * 0.4;
+        bestTrack.bbox = blob.bbox;
+        bestTrack.centroid = blob.centroid;
+        bestTrack.lastSeen = now;
+
+        blob.trackId = bestTrack.id;
+        blob.speed = bestTrack.speed;
+        unmatchedTracks.delete(bestTrack.id);
       });
 
       tracker.tracks.forEach((track, id) => {
-        if (!trackIds.has(id) && now - track.lastSeen > TRACK_TIMEOUT) {
-          tracker.tracks.delete(id);
-        }
+        if (now - track.lastSeen > TRACK_TIMEOUT) tracker.tracks.delete(id);
       });
 
-      const active = [];
       const candidatePairs = new Set();
+      const active = [];
 
       lines.filter((line) => line.enabled).forEach((line) => {
         const a = toPixels(line.p1, dimensions.width, dimensions.height);
         const b = toPixels(line.p2, dimensions.width, dimensions.height);
-        const intersects = [];
+
         blobs.forEach((blob) => {
-          const dist = pointToSegmentDistance(blob.centroid, a, b);
-          const blobRadius = Math.max(6, Math.sqrt(blob.area) * 1.4);
-          if (dist > line.thickness + blobRadius) return;
-          intersects.push(blob);
-        });
+          const touching = lineIntersectsRect(a, b, blob.bbox, line.thickness);
+          if (!touching) return;
 
-        const clusters = clusterIntersections(intersects);
-        const lineObjectMap = tracker.lineObjects.get(line.id) || new Map();
-        tracker.lineObjects.set(line.id, lineObjectMap);
-
-        clusters.forEach((cluster) => {
-          let object = null;
-          let closest = Infinity;
-
-          lineObjectMap.forEach((candidate) => {
-            const d = Math.hypot(candidate.centroid.x - cluster.centroid.x, candidate.centroid.y - cluster.centroid.y);
-            if (d < 95 && d < closest) {
-              closest = d;
-              object = candidate;
-            }
-          });
-
-          if (!object) {
-            object = { id: tracker.nextObjectId++, centroid: cluster.centroid, lastSeen: now, speed: cluster.speed };
-            lineObjectMap.set(object.id, object);
-          } else {
-            object.centroid = cluster.centroid;
-            object.speed = object.speed * 0.5 + cluster.speed * 0.5;
-            object.lastSeen = now;
-          }
-
-          const pairId = `${line.id}:obj-${object.id}`;
+          const pairId = `${line.id}:track-${blob.trackId}`;
           candidatePairs.add(pairId);
-          const prev = tracker.activePairs.get(pairId) || { enteredAt: now, lineId: line.id, objectId: object.id };
-          prev.lastSeen = now;
-          prev.speed = object.speed;
-          prev.centroid = object.centroid;
-          tracker.activePairs.set(pairId, prev);
+
+          const previous = tracker.activePairs.get(pairId) || {
+            enteredAt: now,
+            lineId: line.id,
+            trackId: blob.trackId,
+          };
+          previous.lastSeen = now;
+          previous.speed = blob.speed;
+          previous.centroid = blob.centroid;
+          previous.bbox = blob.bbox;
+          tracker.activePairs.set(pairId, previous);
 
           active.push({
             id: pairId,
             lineId: line.id,
-            objectId: object.id,
-            speed: object.speed,
-            centroid: object.centroid,
+            trackId: blob.trackId,
+            speed: blob.speed,
+            centroid: blob.centroid,
+            bbox: blob.bbox,
             color: line.color,
           });
-        });
-
-        lineObjectMap.forEach((object, objectId) => {
-          if (now - object.lastSeen > OBJECT_TIMEOUT) {
-            lineObjectMap.delete(objectId);
-          }
         });
       });
 
@@ -351,21 +331,12 @@ export function useMotionDetection({
       });
 
       setIntersections(Array.from(tracker.activePairs.entries()).map(([id, pair]) => ({ id, ...pair })));
-
-      if (debugEnabled) {
-        setDebugState({ blobs, active });
-      } else {
-        setDebugState({ blobs: [], active: [] });
-      }
-
-      frameRef.current.prev = frame;
+      setDebugState(debugEnabled ? { blobs, active } : { blobs: [], active: [] });
     };
 
     rafRef.current = requestAnimationFrame(tick);
 
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-    };
+    return () => cancelAnimationFrame(rafRef.current);
   }, [debugEnabled, dimensions.height, dimensions.width, isPlaying, lines, videoRef]);
 
   return { debugState, intersections };

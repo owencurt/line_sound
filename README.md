@@ -25,10 +25,10 @@ As motion intersects each line, a polyphonic synth plays notes whose pitch track
   - high pitch range
   - gain
 - Motion detection pipeline:
-  - frame differencing
+  - running-background subtraction
+  - morphology (dilate/erode)
   - connected-component blob extraction
-  - centroid speed estimation
-  - lightweight blob tracking for multiple objects
+  - bounding-box object tracking with IoU + centroid continuity
 - Entry/sustain/release intersection state for stable note triggering
 - Polyphonic sample-based concert piano engine with smooth envelope and anti-spam sustain behavior
 - Debug overlay toggle (blobs, centroids, active intersections)
@@ -55,16 +55,19 @@ Then open the local Vite URL.
 ### 2) Motion detection approach
 
 - While video is playing, frames are sampled on a downscaled hidden canvas for performance.
-- Per-pixel RGB frame differencing identifies motion pixels.
-- A thresholded binary mask is grouped via connected components into blobs.
-- Each blob yields centroid + bounding box + area.
+- A running grayscale background model is maintained and subtracted from each frame to produce foreground motion masks.
+- Morphological filtering (dilate/erode) fills sparse regions so cars are detected as full bodies more often.
+- Connected components produce object bounding boxes + centroids used by the tracker.
 
 ### 3) Tracking and intersections
 
-- Blobs are associated to short-lived tracks using nearest-centroid matching.
-- Track speed is smoothed over time.
-- For each enabled line, centroid-to-segment distance is checked against line thickness + blob radius.
-- To reduce single-object double-triggering (front/back edges), intersecting blobs are clustered per line before note triggering so each physical object tends to produce one held note.
+- Bounding-box detections are associated to tracks using IoU and centroid continuity.
+- Track speed is smoothed from centroid deltas.
+- Note triggering is based on **line vs bounding-box contact**:
+  - play once when a tracked box first touches the line
+  - hold while that same box keeps touching
+  - release after exit hysteresis timeout
+- This means longer objects naturally hold the same note longer because their box stays intersecting the line longer.
 - Line/track pairs are held with hysteresis timeouts to avoid flicker:
   - enter: start note once
   - sustain: keep note alive while pair remains active
