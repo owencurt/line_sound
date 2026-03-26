@@ -12,6 +12,11 @@ export const speedToMidi = (speed, offset = 0, sensitivity = 1) => {
 };
 
 export const speedToFrequency = (speed, settings) => {
+  const midi = speedToMidiFromSettings(speed, settings);
+  return midiToFrequency(midi);
+};
+
+export const speedToMidiFromSettings = (speed, settings) => {
   const offset = settings?.noteOffset ?? 0;
   const sensitivity = settings?.sensitivity ?? 1;
   const pitchSpread = settings?.pitchSpread ?? 1;
@@ -19,6 +24,5 @@ export const speedToFrequency = (speed, settings) => {
   const normalized = clamp((speed * sensitivity) / 350, 0, 1);
   const spreadLength = clamp(Math.round((SCALE_NOTES.length - 1) * pitchSpread), 3, SCALE_NOTES.length - 1);
   const index = Math.round(normalized * spreadLength);
-  const midi = clamp(SCALE_NOTES[index] + offset, 24, 96);
-  return midiToFrequency(midi);
+  return clamp(SCALE_NOTES[index] + offset, 24, 96);
 };

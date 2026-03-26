@@ -1,24 +1,44 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { speedToFrequency } from '../lib/audioScale';
+import { speedToMidiFromSettings } from '../lib/audioScale';
+
+const SAMPLE_ROOTS = [36, 43, 48, 55, 60, 67, 72, 79, 84];
+const SAMPLE_BASE_URL = 'https://cdn.jsdelivr.net/gh/gleitz/midi-js-soundfonts@master/FluidR3_GM/acoustic_grand_piano-mp3';
+
+const midiToNoteName = (midi) => {
+  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const note = names[midi % 12];
+  const octave = Math.floor(midi / 12) - 1;
+  return `${note}${octave}`;
+};
+
+const pickNearestSampleMidi = (targetMidi) => {
+  let nearest = SAMPLE_ROOTS[0];
+  let best = Math.abs(targetMidi - nearest);
+  SAMPLE_ROOTS.forEach((root) => {
+    const d = Math.abs(targetMidi - root);
+    if (d < best) {
+      best = d;
+      nearest = root;
+    }
+  });
+  return nearest;
+};
 
 export function useAudioEngine() {
   const audioContextRef = useRef(null);
   const masterRef = useRef(null);
+  const sampleBuffersRef = useRef(new Map());
+  const loadingRef = useRef(new Map());
   const voicesRef = useRef(new Map());
-  const waveRef = useRef(null);
 
   const ensureContext = useCallback(async () => {
     if (!audioContextRef.current) {
       const context = new window.AudioContext();
       const master = context.createGain();
-      master.gain.value = 0.55;
+      master.gain.value = 0.8;
       master.connect(context.destination);
       audioContextRef.current = context;
       masterRef.current = master;
-
-      const real = new Float32Array([0, 1, 0.42, 0.22, 0.1, 0.08, 0.05, 0.03]);
-      const imag = new Float32Array(real.length);
-      waveRef.current = context.createPeriodicWave(real, imag);
     }
 
     if (audioContextRef.current.state === 'suspended') {
@@ -26,95 +46,80 @@ export function useAudioEngine() {
     }
   }, []);
 
+  const fetchSample = useCallback(async (midi) => {
+    if (sampleBuffersRef.current.has(midi)) return sampleBuffersRef.current.get(midi);
+    if (loadingRef.current.has(midi)) return loadingRef.current.get(midi);
+
+    const noteName = midiToNoteName(midi).replace('#', 's');
+    const promise = (async () => {
+      const response = await fetch(`${SAMPLE_BASE_URL}/${noteName}.mp3`);
+      if (!response.ok) throw new Error(`Failed to load piano sample ${noteName}`);
+      const buffer = await response.arrayBuffer();
+      const decoded = await audioContextRef.current.decodeAudioData(buffer);
+      sampleBuffersRef.current.set(midi, decoded);
+      loadingRef.current.delete(midi);
+      return decoded;
+    })();
+
+    loadingRef.current.set(midi, promise);
+    return promise;
+  }, []);
+
   const noteOn = useCallback(async (id, speed, settings) => {
     await ensureContext();
     const context = audioContextRef.current;
-
     if (!context || !masterRef.current) return;
 
-    const existing = voicesRef.current.get(id);
-    const frequency = speedToFrequency(speed, settings);
+    const targetMidi = speedToMidiFromSettings(speed, settings);
+    const voice = voicesRef.current.get(id);
 
-    if (existing) {
-      existing.targetFrequency = frequency;
-      existing.oscA.frequency.setTargetAtTime(frequency, context.currentTime, 0.05);
-      existing.oscB.frequency.setTargetAtTime(frequency * 2, context.currentTime, 0.05);
-      existing.oscC.frequency.setTargetAtTime(frequency * 3.98, context.currentTime, 0.05);
+    if (voice) {
+      const nearestRoot = pickNearestSampleMidi(targetMidi);
+      voice.source.playbackRate.setTargetAtTime(
+        2 ** ((targetMidi - nearestRoot) / 12),
+        context.currentTime,
+        0.07,
+      );
       return;
     }
 
-    const output = context.createGain();
-    const body = context.createGain();
-    const hammer = context.createGain();
-    const toneFilter = context.createBiquadFilter();
-    const hammerFilter = context.createBiquadFilter();
-    const oscA = context.createOscillator();
-    const oscB = context.createOscillator();
-    const oscC = context.createOscillator();
-    const noise = context.createBufferSource();
-
-    toneFilter.type = 'lowpass';
-    toneFilter.frequency.value = 3600;
-    toneFilter.Q.value = 0.9;
-
-    hammerFilter.type = 'bandpass';
-    hammerFilter.frequency.value = 2400;
-    hammerFilter.Q.value = 0.7;
-
-    oscA.setPeriodicWave(waveRef.current);
-    oscB.type = 'sine';
-    oscC.type = 'triangle';
-
-    oscA.frequency.value = frequency;
-    oscB.frequency.value = frequency * 2.01;
-    oscC.frequency.value = frequency * 3.98;
-
-    const noiseBuffer = context.createBuffer(1, Math.round(context.sampleRate * 0.02), context.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < noiseData.length; i += 1) {
-      noiseData[i] = (Math.random() * 2 - 1) * (1 - i / noiseData.length);
+    const rootMidi = pickNearestSampleMidi(targetMidi);
+    let sampleBuffer;
+    try {
+      sampleBuffer = await fetchSample(rootMidi);
+    } catch {
+      return;
     }
-    noise.buffer = noiseBuffer;
 
-    body.gain.value = 0.7;
-    hammer.gain.value = 0;
-    output.gain.value = 0;
+    const source = context.createBufferSource();
+    source.buffer = sampleBuffer;
+    source.loop = true;
+    source.loopStart = Math.min(0.42, Math.max(0, sampleBuffer.duration * 0.2));
+    source.loopEnd = Math.max(source.loopStart + 0.12, sampleBuffer.duration - 0.03);
 
-    oscA.connect(body);
-    oscB.connect(body);
-    oscC.connect(body);
-    body.connect(toneFilter);
-    toneFilter.connect(output);
+    const noteGain = context.createGain();
+    const bodyFilter = context.createBiquadFilter();
+    bodyFilter.type = 'lowpass';
+    bodyFilter.frequency.value = 5600;
+    bodyFilter.Q.value = 0.6;
 
-    noise.connect(hammerFilter);
-    hammerFilter.connect(hammer);
-    hammer.connect(output);
+    source.playbackRate.value = 2 ** ((targetMidi - rootMidi) / 12);
 
-    output.connect(masterRef.current);
+    source.connect(bodyFilter);
+    bodyFilter.connect(noteGain);
+    noteGain.connect(masterRef.current);
 
     const now = context.currentTime;
-    const peak = 0.12 + settings.gain * 0.2;
-    const sustain = peak * 0.45;
+    const peak = 0.1 + settings.gain * 0.24;
+    const sustain = peak * 0.7;
+    noteGain.gain.setValueAtTime(0, now);
+    noteGain.gain.linearRampToValueAtTime(peak, now + 0.015);
+    noteGain.gain.exponentialRampToValueAtTime(sustain, now + 0.24);
 
-    output.gain.cancelScheduledValues(now);
-    output.gain.setValueAtTime(0, now);
-    output.gain.linearRampToValueAtTime(peak, now + 0.01);
-    output.gain.exponentialRampToValueAtTime(sustain, now + 0.18);
+    source.start(now);
 
-    hammer.gain.setValueAtTime(0.12, now);
-    hammer.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
-
-    toneFilter.frequency.setValueAtTime(4800, now);
-    toneFilter.frequency.exponentialRampToValueAtTime(2600, now + 0.22);
-
-    oscA.start(now);
-    oscB.start(now);
-    oscC.start(now);
-    noise.start(now);
-    noise.stop(now + 0.06);
-
-    voicesRef.current.set(id, { oscA, oscB, oscC, output, targetFrequency: frequency });
-  }, [ensureContext]);
+    voicesRef.current.set(id, { source, noteGain });
+  }, [ensureContext, fetchSample]);
 
   const noteOff = useCallback((id) => {
     const context = audioContextRef.current;
@@ -122,14 +127,9 @@ export function useAudioEngine() {
     if (!voice || !context) return;
 
     const now = context.currentTime;
-    voice.output.gain.cancelScheduledValues(now);
-    voice.output.gain.setTargetAtTime(0.0001, now, 0.09);
-
-    const stopAt = now + 0.45;
-    voice.oscA.stop(stopAt);
-    voice.oscB.stop(stopAt);
-    voice.oscC.stop(stopAt);
-
+    voice.noteGain.gain.cancelScheduledValues(now);
+    voice.noteGain.gain.setTargetAtTime(0.0001, now, 0.13);
+    voice.source.stop(now + 0.7);
     voicesRef.current.delete(id);
   }, []);
 

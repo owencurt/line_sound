@@ -30,7 +30,7 @@ As motion intersects each line, a polyphonic synth plays notes whose pitch track
   - centroid speed estimation
   - lightweight blob tracking for multiple objects
 - Entry/sustain/release intersection state for stable note triggering
-- Polyphonic Web Audio synth with smooth envelope and anti-spam sustain behavior
+- Polyphonic sample-based concert piano engine with smooth envelope and anti-spam sustain behavior
 - Debug overlay toggle (blobs, centroids, active intersections)
 - Line persistence in `localStorage`
 - JSON export/import for line configurations
@@ -72,7 +72,7 @@ Then open the local Vite URL.
 
 ### 4) Audio mapping logic
 
-- Web Audio API poly synth (triangle + sine harmonic through lowpass filter).
+- Web Audio API sample-based piano engine (concert grand samples with pitch-shifted nearest-note playback).
 - Object speed maps to a curated musical scale (not arbitrary frequencies): each line converts smoothed object speed into a normalized motion value and selects scale notes from low→high.
 - Note chosen for each active object/line pair depends on:
   - smoothed centroid speed from the tracker
