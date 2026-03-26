@@ -23,6 +23,7 @@ As motion intersects each line, a polyphonic synth plays notes whose pitch track
   - note offset
   - pitch sensitivity
   - high pitch range
+  - optional top-vs-bottom vertical pitch mapping
   - gain
 - Motion detection pipeline:
   - running-background subtraction
@@ -82,6 +83,7 @@ Then open the local Vite URL.
   - per-line `pitch sensitivity` (how quickly speed climbs the scale)
   - per-line `high pitch range` (how much of the top end of the scale is reachable)
   - per-line `note offset` (global transposition in semitones)
+  - optional vertical mapping (`top of frame = higher pitch`, bottom = lower pitch)
 - A note is chosen on first contact and then held at that fixed pitch for the full intersection. It releases after hysteresis timeout when the object exits.
 - Sustain/release timing factors:
   - frame processing interval (analysis cadence)

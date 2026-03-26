@@ -65,12 +65,12 @@ export function useAudioEngine() {
     return promise;
   }, []);
 
-  const noteOn = useCallback(async (id, speed, settings) => {
+  const noteOn = useCallback(async (id, speed, settings, noteContext = {}) => {
     await ensureContext();
     const context = audioContextRef.current;
     if (!context || !masterRef.current) return;
 
-    const targetMidi = speedToMidiFromSettings(speed, settings);
+    const targetMidi = speedToMidiFromSettings(speed, settings, noteContext);
     const voice = voicesRef.current.get(id);
 
     if (voice) {

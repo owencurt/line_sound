@@ -14,6 +14,8 @@ const defaultLineValues = {
   noteOffset: 0,
   sensitivity: 1,
   pitchSpread: 1,
+  verticalPitch: true,
+  verticalRange: 5,
   gain: 0.7,
   p1: { x: 0.3, y: 0.2 },
   p2: { x: 0.7, y: 0.8 },
@@ -29,6 +31,8 @@ function sanitizeLine(line, index = 0) {
     noteOffset: Number.isFinite(line.noteOffset) ? line.noteOffset : defaultLineValues.noteOffset,
     sensitivity: Number.isFinite(line.sensitivity) ? line.sensitivity : defaultLineValues.sensitivity,
     pitchSpread: Number.isFinite(line.pitchSpread) ? line.pitchSpread : defaultLineValues.pitchSpread,
+    verticalPitch: typeof line.verticalPitch === 'boolean' ? line.verticalPitch : defaultLineValues.verticalPitch,
+    verticalRange: Number.isFinite(line.verticalRange) ? line.verticalRange : defaultLineValues.verticalRange,
     gain: Number.isFinite(line.gain) ? line.gain : defaultLineValues.gain,
     p1: line.p1 ?? defaultLineValues.p1,
     p2: line.p2 ?? defaultLineValues.p2,
@@ -93,7 +97,9 @@ export default function App() {
     intersections.forEach((intersection) => {
       const line = linesById.get(intersection.lineId);
       if (!line || !line.enabled) return;
-      audio.noteOn(intersection.id, intersection.speed, line);
+      audio.noteOn(intersection.id, intersection.speed, line, {
+        yNorm: videoSize.height ? intersection.centroid.y / videoSize.height : 0.5,
+      });
     });
 
     audioStateRef.current.forEach((_, voiceId) => {
@@ -106,7 +112,7 @@ export default function App() {
     intersections.forEach((intersection) => {
       audioStateRef.current.set(intersection.id, true);
     });
-  }, [audio, intersections, linesById]);
+  }, [audio, intersections, linesById, videoSize.height]);
 
   const audioStateRef = useRef(new Map());
 

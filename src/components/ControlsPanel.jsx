@@ -117,6 +117,28 @@ export function ControlsPanel({
             />
           </label>
 
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={selectedLine.verticalPitch ?? true}
+              onChange={(e) => onUpdateLine(selectedLine.id, { verticalPitch: e.target.checked })}
+            />
+            Top of frame = higher pitch
+          </label>
+
+          <label>
+            Vertical pitch range ({(selectedLine.verticalRange ?? 5).toFixed(1)} st)
+            <input
+              type="range"
+              min="0"
+              max="12"
+              step="0.5"
+              value={selectedLine.verticalRange ?? 5}
+              onChange={(e) => onUpdateLine(selectedLine.id, { verticalRange: Number(e.target.value) })}
+              disabled={!(selectedLine.verticalPitch ?? true)}
+            />
+          </label>
+
           <label>
             Gain ({(selectedLine.gain ?? 0.7).toFixed(2)})
             <input
