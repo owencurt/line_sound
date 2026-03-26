@@ -17,6 +17,7 @@ function createLine(index = 0) {
     thickness: 8,
     noteOffset: 0,
     sensitivity: 1,
+    pitchSpread: 1,
     gain: 0.7,
     p1: { x: 0.3, y: 0.2 },
     p2: { x: 0.7, y: 0.8 },
@@ -45,6 +46,7 @@ export default function App() {
   const [selectedLineId, setSelectedLineId] = useState(lines[0]?.id ?? null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [videoMuted, setVideoMuted] = useState(false);
 
   const audio = useAudioEngine();
 
@@ -226,6 +228,7 @@ export default function App() {
               if (!video) return;
               setDuration(video.duration || 0);
             }}
+            muted={videoMuted}
           />
           {sourceUrl && (
             <div className="playback-controls">
@@ -241,6 +244,14 @@ export default function App() {
               <span>
                 {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
               </span>
+              <label className="mute-toggle">
+                <input
+                  type="checkbox"
+                  checked={videoMuted}
+                  onChange={(e) => setVideoMuted(e.target.checked)}
+                />
+                Mute original video
+              </label>
             </div>
           )}
         </section>

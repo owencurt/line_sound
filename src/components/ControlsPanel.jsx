@@ -106,6 +106,18 @@ export function ControlsPanel({
           </label>
 
           <label>
+            High pitch range ({selectedLine.pitchSpread.toFixed(2)}x)
+            <input
+              type="range"
+              min="0.45"
+              max="1"
+              step="0.05"
+              value={selectedLine.pitchSpread}
+              onChange={(e) => onUpdateLine(selectedLine.id, { pitchSpread: Number(e.target.value) })}
+            />
+          </label>
+
+          <label>
             Gain ({selectedLine.gain.toFixed(2)})
             <input
               type="range"

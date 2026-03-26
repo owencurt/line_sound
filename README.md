@@ -7,6 +7,7 @@ As motion intersects each line, a polyphonic synth plays notes whose pitch track
 ## Features
 
 - Local video upload (no backend required)
+- Optional mute toggle for original video audio
 - Responsive video stage with aspect-ratio-safe canvas overlays
 - Multi-line editor with:
   - drag to move
@@ -21,6 +22,7 @@ As motion intersects each line, a polyphonic synth plays notes whose pitch track
   - line thickness
   - note offset
   - pitch sensitivity
+  - high pitch range
   - gain
 - Motion detection pipeline:
   - frame differencing
@@ -70,9 +72,17 @@ Then open the local Vite URL.
 ### 4) Audio mapping logic
 
 - Web Audio API poly synth (triangle + sine harmonic through lowpass filter).
-- Object speed maps to a curated musical scale (not arbitrary frequencies).
-- Per-line note offset and sensitivity shape pitch behavior.
-- Notes update pitch while sustained and release with envelope smoothing.
+- Object speed maps to a curated musical scale (not arbitrary frequencies): each line converts smoothed object speed into a normalized motion value and selects scale notes from low→high.
+- Note chosen for each active object/line pair depends on:
+  - smoothed centroid speed from the tracker
+  - per-line `pitch sensitivity` (how quickly speed climbs the scale)
+  - per-line `high pitch range` (how much of the top end of the scale is reachable)
+  - per-line `note offset` (global transposition in semitones)
+- A note starts once when a tracked object first intersects a line, sustains while the pair remains active, and releases after hysteresis timeout if intersection disappears.
+- Sustain/release timing factors:
+  - frame processing interval (analysis cadence)
+  - `RELEASE_TIMEOUT` hysteresis in motion hook (prevents flicker cut-offs)
+  - audio envelope release in `useAudioEngine` (smooth tail on note-off)
 
 ## Architecture
 
@@ -93,7 +103,7 @@ src/
 ## Limitations
 
 - Motion detection uses simple frame differencing, so sudden lighting changes can trigger blobs.
-- Tracking is intentionally lightweight and may swap IDs in crowded/fast scenes.
+- Tracking is intentionally lightweight and may swap IDs in crowded/fast scenes (though nearby blob merging helps reduce front/back double-trigger artifacts on single objects).
 - Current synth is “piano-like” but not sample-based acoustic piano.
 - Best results with stable camera footage and visible object contrast.
 

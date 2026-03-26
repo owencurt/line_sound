@@ -42,6 +42,7 @@ export function VideoStage({
   onPlaybackState,
   onTimeUpdate,
   onDurationChange,
+  muted,
 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -237,6 +238,7 @@ export function VideoStage({
             onPause={() => onPlaybackState(false)}
             onTimeUpdate={onTimeUpdate}
             onDurationChange={onDurationChange}
+            muted={muted}
           />
           <canvas
             ref={canvasRef}

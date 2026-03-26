@@ -6,6 +6,59 @@ const FRAME_INTERVAL = 70;
 const TRACK_TIMEOUT = 220;
 const RELEASE_TIMEOUT = 180;
 
+function mergeNearbyBlobs(sourceBlobs) {
+  const blobs = [...sourceBlobs];
+  const merged = [];
+
+  while (blobs.length) {
+    let base = blobs.pop();
+    let didMerge = true;
+
+    while (didMerge) {
+      didMerge = false;
+      for (let i = blobs.length - 1; i >= 0; i -= 1) {
+        const candidate = blobs[i];
+        const cx = base.centroid.x - candidate.centroid.x;
+        const cy = base.centroid.y - candidate.centroid.y;
+        const centroidDistance = Math.hypot(cx, cy);
+
+        const gapX = Math.max(
+          0,
+          Math.max(base.bbox.minX, candidate.bbox.minX) - Math.min(base.bbox.maxX, candidate.bbox.maxX),
+        );
+        const gapY = Math.max(
+          0,
+          Math.max(base.bbox.minY, candidate.bbox.minY) - Math.min(base.bbox.maxY, candidate.bbox.maxY),
+        );
+        const edgeGap = Math.hypot(gapX, gapY);
+
+        if (centroidDistance > 90 && edgeGap > 28) continue;
+
+        const area = base.area + candidate.area;
+        base = {
+          area,
+          centroid: {
+            x: (base.centroid.x * base.area + candidate.centroid.x * candidate.area) / area,
+            y: (base.centroid.y * base.area + candidate.centroid.y * candidate.area) / area,
+          },
+          bbox: {
+            minX: Math.min(base.bbox.minX, candidate.bbox.minX),
+            minY: Math.min(base.bbox.minY, candidate.bbox.minY),
+            maxX: Math.max(base.bbox.maxX, candidate.bbox.maxX),
+            maxY: Math.max(base.bbox.maxY, candidate.bbox.maxY),
+          },
+        };
+        blobs.splice(i, 1);
+        didMerge = true;
+      }
+    }
+
+    merged.push(base);
+  }
+
+  return merged;
+}
+
 function connectedComponents(binary, width, height, minArea) {
   const visited = new Uint8Array(binary.length);
   const blobs = [];
@@ -126,7 +179,7 @@ export function useMotionDetection({
         if (diff > 46) diffBinary[p] = 1;
       }
 
-      const blobs = connectedComponents(diffBinary, analysisWidth, analysisHeight, minArea).map((blob) => ({
+      const scaledBlobs = connectedComponents(diffBinary, analysisWidth, analysisHeight, minArea).map((blob) => ({
         ...blob,
         centroid: {
           x: (blob.centroid.x / analysisWidth) * dimensions.width,
@@ -139,6 +192,8 @@ export function useMotionDetection({
           maxY: (blob.bbox.maxY / analysisHeight) * dimensions.height,
         },
       }));
+
+      const blobs = mergeNearbyBlobs(scaledBlobs);
 
       const tracker = trackingRef.current;
       const now = performance.now();

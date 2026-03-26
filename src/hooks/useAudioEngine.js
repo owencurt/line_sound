@@ -33,7 +33,7 @@ export function useAudioEngine() {
     if (!context || !masterRef.current) return;
 
     const existing = voicesRef.current.get(id);
-    const frequency = speedToFrequency(speed, settings.noteOffset, settings.sensitivity);
+    const frequency = speedToFrequency(speed, settings);
 
     if (existing) {
       existing.targetFrequency = frequency;
