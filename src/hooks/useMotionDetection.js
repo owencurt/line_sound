@@ -5,6 +5,43 @@ const MAX_ANALYSIS_WIDTH = 320;
 const FRAME_INTERVAL = 70;
 const TRACK_TIMEOUT = 220;
 const RELEASE_TIMEOUT = 180;
+const OBJECT_TIMEOUT = 260;
+
+function clusterIntersections(intersections) {
+  const clusters = [];
+
+  intersections.forEach((item) => {
+    let bestCluster = null;
+    let bestDistance = Infinity;
+
+    clusters.forEach((cluster) => {
+      const d = Math.hypot(cluster.centroid.x - item.centroid.x, cluster.centroid.y - item.centroid.y);
+      if (d < 80 && d < bestDistance) {
+        bestDistance = d;
+        bestCluster = cluster;
+      }
+    });
+
+    if (!bestCluster) {
+      clusters.push({
+        area: item.area,
+        centroid: item.centroid,
+        speed: item.speed,
+      });
+      return;
+    }
+
+    const combinedArea = bestCluster.area + item.area;
+    bestCluster.centroid = {
+      x: (bestCluster.centroid.x * bestCluster.area + item.centroid.x * item.area) / combinedArea,
+      y: (bestCluster.centroid.y * bestCluster.area + item.centroid.y * item.area) / combinedArea,
+    };
+    bestCluster.speed = Math.max(bestCluster.speed, item.speed);
+    bestCluster.area = combinedArea;
+  });
+
+  return clusters;
+}
 
 function mergeNearbyBlobs(sourceBlobs) {
   const blobs = [...sourceBlobs];
@@ -128,7 +165,9 @@ export function useMotionDetection({
   const frameRef = useRef({ prev: null, ts: 0 });
   const trackingRef = useRef({
     nextTrackId: 1,
+    nextObjectId: 1,
     tracks: new Map(),
+    lineObjects: new Map(),
     activePairs: new Map(),
   });
   const analysisCanvasRef = useRef(null);
@@ -247,28 +286,61 @@ export function useMotionDetection({
       lines.filter((line) => line.enabled).forEach((line) => {
         const a = toPixels(line.p1, dimensions.width, dimensions.height);
         const b = toPixels(line.p2, dimensions.width, dimensions.height);
-
+        const intersects = [];
         blobs.forEach((blob) => {
           const dist = pointToSegmentDistance(blob.centroid, a, b);
           const blobRadius = Math.max(6, Math.sqrt(blob.area) * 1.4);
           if (dist > line.thickness + blobRadius) return;
+          intersects.push(blob);
+        });
 
-          const pairId = `${line.id}:${blob.trackId}`;
+        const clusters = clusterIntersections(intersects);
+        const lineObjectMap = tracker.lineObjects.get(line.id) || new Map();
+        tracker.lineObjects.set(line.id, lineObjectMap);
+
+        clusters.forEach((cluster) => {
+          let object = null;
+          let closest = Infinity;
+
+          lineObjectMap.forEach((candidate) => {
+            const d = Math.hypot(candidate.centroid.x - cluster.centroid.x, candidate.centroid.y - cluster.centroid.y);
+            if (d < 95 && d < closest) {
+              closest = d;
+              object = candidate;
+            }
+          });
+
+          if (!object) {
+            object = { id: tracker.nextObjectId++, centroid: cluster.centroid, lastSeen: now, speed: cluster.speed };
+            lineObjectMap.set(object.id, object);
+          } else {
+            object.centroid = cluster.centroid;
+            object.speed = object.speed * 0.5 + cluster.speed * 0.5;
+            object.lastSeen = now;
+          }
+
+          const pairId = `${line.id}:obj-${object.id}`;
           candidatePairs.add(pairId);
-          const prev = tracker.activePairs.get(pairId) || { enteredAt: now, lineId: line.id, trackId: blob.trackId };
+          const prev = tracker.activePairs.get(pairId) || { enteredAt: now, lineId: line.id, objectId: object.id };
           prev.lastSeen = now;
-          prev.speed = blob.speed;
-          prev.centroid = blob.centroid;
+          prev.speed = object.speed;
+          prev.centroid = object.centroid;
           tracker.activePairs.set(pairId, prev);
 
           active.push({
             id: pairId,
             lineId: line.id,
-            trackId: blob.trackId,
-            speed: blob.speed,
-            centroid: blob.centroid,
+            objectId: object.id,
+            speed: object.speed,
+            centroid: object.centroid,
             color: line.color,
           });
+        });
+
+        lineObjectMap.forEach((object, objectId) => {
+          if (now - object.lastSeen > OBJECT_TIMEOUT) {
+            lineObjectMap.delete(objectId);
+          }
         });
       });
 

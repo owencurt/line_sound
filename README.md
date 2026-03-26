@@ -64,6 +64,7 @@ Then open the local Vite URL.
 - Blobs are associated to short-lived tracks using nearest-centroid matching.
 - Track speed is smoothed over time.
 - For each enabled line, centroid-to-segment distance is checked against line thickness + blob radius.
+- To reduce single-object double-triggering (front/back edges), intersecting blobs are clustered per line before note triggering so each physical object tends to produce one held note.
 - Line/track pairs are held with hysteresis timeouts to avoid flicker:
   - enter: start note once
   - sustain: keep note alive while pair remains active
