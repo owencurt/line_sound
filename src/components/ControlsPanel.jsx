@@ -94,37 +94,37 @@ export function ControlsPanel({
           </label>
 
           <label>
-            Pitch sensitivity ({selectedLine.sensitivity.toFixed(2)})
+            Pitch sensitivity ({(selectedLine.sensitivity ?? 1).toFixed(2)})
             <input
               type="range"
               min="0.4"
               max="2"
               step="0.05"
-              value={selectedLine.sensitivity}
+              value={selectedLine.sensitivity ?? 1}
               onChange={(e) => onUpdateLine(selectedLine.id, { sensitivity: Number(e.target.value) })}
             />
           </label>
 
           <label>
-            High pitch range ({selectedLine.pitchSpread.toFixed(2)}x)
+            High pitch range ({(selectedLine.pitchSpread ?? 1).toFixed(2)}x)
             <input
               type="range"
               min="0.45"
               max="1"
               step="0.05"
-              value={selectedLine.pitchSpread}
+              value={selectedLine.pitchSpread ?? 1}
               onChange={(e) => onUpdateLine(selectedLine.id, { pitchSpread: Number(e.target.value) })}
             />
           </label>
 
           <label>
-            Gain ({selectedLine.gain.toFixed(2)})
+            Gain ({(selectedLine.gain ?? 0.7).toFixed(2)})
             <input
               type="range"
               min="0.1"
               max="1"
               step="0.05"
-              value={selectedLine.gain}
+              value={selectedLine.gain ?? 0.7}
               onChange={(e) => onUpdateLine(selectedLine.id, { gain: Number(e.target.value) })}
             />
           </label>

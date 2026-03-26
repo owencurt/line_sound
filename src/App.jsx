@@ -8,19 +8,39 @@ import { useMotionDetection } from './hooks/useMotionDetection';
 const STORAGE_KEY = 'line-sound-lines-v1';
 const COLORS = ['#f900ff', '#2dd4bf', '#f97316', '#60a5fa', '#f43f5e', '#facc15'];
 
+const defaultLineValues = {
+  enabled: true,
+  thickness: 8,
+  noteOffset: 0,
+  sensitivity: 1,
+  pitchSpread: 1,
+  gain: 0.7,
+  p1: { x: 0.3, y: 0.2 },
+  p2: { x: 0.7, y: 0.8 },
+};
+
+function sanitizeLine(line, index = 0) {
+  return {
+    id: line.id ?? crypto.randomUUID(),
+    name: line.name ?? `Line ${index + 1}`,
+    color: line.color ?? COLORS[index % COLORS.length],
+    enabled: typeof line.enabled === 'boolean' ? line.enabled : defaultLineValues.enabled,
+    thickness: Number.isFinite(line.thickness) ? line.thickness : defaultLineValues.thickness,
+    noteOffset: Number.isFinite(line.noteOffset) ? line.noteOffset : defaultLineValues.noteOffset,
+    sensitivity: Number.isFinite(line.sensitivity) ? line.sensitivity : defaultLineValues.sensitivity,
+    pitchSpread: Number.isFinite(line.pitchSpread) ? line.pitchSpread : defaultLineValues.pitchSpread,
+    gain: Number.isFinite(line.gain) ? line.gain : defaultLineValues.gain,
+    p1: line.p1 ?? defaultLineValues.p1,
+    p2: line.p2 ?? defaultLineValues.p2,
+  };
+}
+
 function createLine(index = 0) {
   return {
     id: crypto.randomUUID(),
     name: `Line ${index + 1}`,
     color: COLORS[index % COLORS.length],
-    enabled: true,
-    thickness: 8,
-    noteOffset: 0,
-    sensitivity: 1,
-    pitchSpread: 1,
-    gain: 0.7,
-    p1: { x: 0.3, y: 0.2 },
-    p2: { x: 0.7, y: 0.8 },
+    ...defaultLineValues,
   };
 }
 
@@ -30,7 +50,7 @@ function getInitialLines() {
     if (!raw) return [createLine(0)];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || !parsed.length) return [createLine(0)];
-    return parsed;
+    return parsed.map((line, index) => sanitizeLine(line, index));
   } catch {
     return [createLine(0)];
   }
@@ -137,8 +157,9 @@ export default function App() {
     const text = await file.text();
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed) && parsed.length) {
-      setLines(parsed);
-      setSelectedLineId(parsed[0].id);
+      const next = parsed.map((line, index) => sanitizeLine(line, index));
+      setLines(next);
+      setSelectedLineId(next[0].id);
     }
     event.target.value = '';
   };
